@@ -3,8 +3,9 @@
 Integrantes:
 - Leonardo de Melo Soares
 - Daniel Machado
-- Isac
+- Isac Freire dos Santos
 - Felipe de Jesus
+- Bruno da Cruz Mendonça
 
 ## Contexto
 
