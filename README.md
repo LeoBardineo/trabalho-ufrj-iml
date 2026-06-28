@@ -54,6 +54,22 @@ Temos como falso positivo o bloqueio de um site seguro, e o falso negativo o dei
 - **F1-Score**: média harmônica entre precision e recall, para o desempate de modelos que se saíram bem em apenas uma das métricas  
 - **Tempo de inferência**: medir quanto tempo o modelo leva para classificar os dados, sendo importante para detectar a URL antes da página carregar para o usuário
 
+## Como Rodar o Projeto Localmente 🚀
+
+O projeto utiliza **Docker** e **Docker Compose** para orquestrar e rodar tanto o front-end quanto o back-end em conjunto de forma simples.
+
+### Pré-requisitos
+* Ter o **Docker** e o **Docker Compose** instalados na sua máquina.
+
+### Executando a Aplicação
+1. Na raiz do repositório, execute o seguinte comando no terminal para construir as imagens e inicializar os containers:
+   ```bash
+   docker compose up --build
+   ```
+2. Assim que os containers estiverem rodando:
+   * **Front-end (Vite + React)**: Acesse [http://localhost:5173](http://localhost:5173) no seu navegador.
+   * **Back-end (FastAPI)**: Estará rodando em [http://localhost:8000](http://localhost:8000). Você pode testar se a API está online acessando a rota de status: [http://localhost:8000/health](http://localhost:8000/health).
+
 ## Referências
 
 PRASAD, Shina; REALPE-MUÑOZ, Pablo. **PhiUSIIL Phishing URL Dataset**. UCI Machine Learning Repository, 2024\. DOI: [https://doi.org/10.1016/j.cose.2023.103545](https://doi.org/10.1016/j.cose.2023.103545). Disponível em: [https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset](https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset). Acesso em: 1 jun. 2026\. 
