@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const API_URL = 'http://localhost:8000'
 
@@ -9,13 +9,60 @@ interface PredictResult {
   features: Record<string, number | string>
   prediction: number | null
   label: string | null
+  model_used?: string
 }
 
 function UrlTestPage() {
-  const [url, setUrl] = useState('')
-  const [status, setStatus] = useState<Status>('idle')
-  const [result, setResult] = useState<PredictResult | null>(null)
-  const [error, setError] = useState('')
+  const [url, setUrl] = useState(() => sessionStorage.getItem('test_url') || '')
+  const [status, setStatus] = useState<Status>(() => (sessionStorage.getItem('test_status') as Status) || 'idle')
+  const [result, setResult] = useState<PredictResult | null>(() => {
+    const saved = sessionStorage.getItem('test_result')
+    return saved ? JSON.parse(saved) : null
+  })
+  const [error, setError] = useState(() => sessionStorage.getItem('test_error') || '')
+  const [models, setModels] = useState<{ key: string; label: string }[]>([
+    { key: 'arvore_otimizado', label: 'Automático (Árvore de Decisão Otimizada)' }
+  ])
+  const [selectedModel, setSelectedModel] = useState(() => sessionStorage.getItem('test_model') || 'arvore_otimizado')
+
+  const handleSetUrl = (val: string) => {
+    setUrl(val)
+    sessionStorage.setItem('test_url', val)
+  }
+  const handleSetStatus = (val: Status) => {
+    setStatus(val)
+    sessionStorage.setItem('test_status', val)
+  }
+  const handleSetResult = (val: PredictResult | null) => {
+    setResult(val)
+    if (val) {
+      sessionStorage.setItem('test_result', JSON.stringify(val))
+    } else {
+      sessionStorage.removeItem('test_result')
+    }
+  }
+  const handleSetError = (val: string) => {
+    setError(val)
+    sessionStorage.setItem('test_error', val)
+  }
+  const handleSetSelectedModel = (val: string) => {
+    setSelectedModel(val)
+    sessionStorage.setItem('test_model', val)
+  }
+
+  useEffect(() => {
+    fetch(`${API_URL}/predict/models`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.models) {
+          setModels(data.models)
+          if (data.default && !sessionStorage.getItem('test_model')) {
+            handleSetSelectedModel(data.default)
+          }
+        }
+      })
+      .catch(err => console.error('Erro ao buscar modelos:', err))
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,15 +70,15 @@ function UrlTestPage() {
     const trimmed = url.trim()
     if (!trimmed) return
 
-    setStatus('loading')
-    setResult(null)
-    setError('')
+    handleSetStatus('loading')
+    handleSetResult(null)
+    handleSetError('')
 
     try {
       const response = await fetch(`${API_URL}/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed }),
+        body: JSON.stringify({ url: trimmed, model_key: selectedModel }),
       })
 
       if (!response.ok) {
@@ -40,16 +87,20 @@ function UrlTestPage() {
       }
 
       const data: PredictResult = await response.json()
-      setResult(data)
-      setStatus('success')
+      handleSetResult(data)
+      handleSetStatus('success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao conectar com a API')
-      setStatus('error')
+      handleSetError(err instanceof Error ? err.message : 'Erro ao conectar com a API')
+      handleSetStatus('error')
     }
   }
 
-  const isPhishing = result?.label === 'phishing' || result?.prediction === 1
-  const isLegitimate = result?.label === 'legitimate' || result?.prediction === 0
+  const getModelLabel = (key: string) => {
+    return models.find(m => m.key === key)?.label || key
+  }
+
+  const isPhishing = result?.label === 'phishing' || result?.prediction === 0
+  const isLegitimate = result?.label === 'legitimate' || result?.prediction === 1
   const hasModelResult = result?.prediction !== null && result?.prediction !== undefined
 
   return (
@@ -65,13 +116,40 @@ function UrlTestPage() {
       </div>
 
       {/* Formulário */}
-      <form onSubmit={handleSubmit} className="mb-8">
+      <form onSubmit={handleSubmit} className="mb-8 space-y-4">
+        {/* Seletor de Modelo */}
+        <div className="flex flex-col gap-2">
+          <label htmlFor="model-select" className="text-sm font-semibold text-slate-300">
+            Modelo de Inteligência Artificial
+          </label>
+          <div className="relative">
+            <select
+              id="model-select"
+              value={selectedModel}
+              onChange={(e) => handleSetSelectedModel(e.target.value)}
+              className="w-full px-5 py-3.5 bg-phish-card border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-phish-accent focus:border-transparent transition-all text-base appearance-none cursor-pointer"
+            >
+              {models.map((m) => (
+                <option key={m.key} value={m.key} className="bg-slate-900 text-white">
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-slate-400">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        {/* Input da URL e Botão de Submit */}
         <div className="flex gap-3">
           <input
             id="url-input"
             type="text"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => handleSetUrl(e.target.value)}
             placeholder="https://exemplo.com.br"
             className="flex-1 px-5 py-4 bg-phish-card border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-phish-accent focus:border-transparent transition-all text-lg"
             disabled={status === 'loading'}
@@ -115,6 +193,9 @@ function UrlTestPage() {
                 {isPhishing ? 'Phishing Detectado!' : 'URL Legítima'}
               </h2>
               <p className="text-slate-400 text-lg break-all">{result.url}</p>
+              <p className="text-slate-400 text-sm mt-3">
+                Modelo utilizado: <span className="font-semibold text-slate-200">{getModelLabel(result.model_used || '')}</span>
+              </p>
             </div>
           ) : (
             <div id="result-card" className="p-8 rounded-2xl border-2 bg-yellow-500/10 border-yellow-500/50 text-center">
@@ -137,7 +218,7 @@ function UrlTestPage() {
             </div>
             <div className="max-h-96 overflow-y-auto">
               <table className="w-full">
-                <thead className="bg-white/5 sticky top-0">
+                <thead className="bg-[#1e293b] sticky top-0 z-10">
                   <tr>
                     <th className="text-left px-6 py-3 text-sm font-medium text-slate-400">Feature</th>
                     <th className="text-right px-6 py-3 text-sm font-medium text-slate-400">Valor</th>
@@ -146,8 +227,8 @@ function UrlTestPage() {
                 <tbody>
                   {Object.entries(result.features).map(([key, value]) => (
                     <tr key={key} className="border-t border-white/5 hover:bg-white/5 transition-colors">
-                      <td className="px-6 py-3 text-sm text-slate-300 font-mono">{key}</td>
-                      <td className="px-6 py-3 text-sm text-right text-slate-100 font-mono">
+                       <td className="px-6 py-3 text-sm text-slate-300 font-mono">{key}</td>
+                       <td className="px-6 py-3 text-sm text-right text-slate-100 font-mono">
                         {typeof value === 'number' ? value.toFixed(4) : String(value)}
                       </td>
                     </tr>
@@ -166,7 +247,7 @@ function UrlTestPage() {
           <h2 className="text-xl font-bold text-red-400 mb-2">Erro na Verificação</h2>
           <p className="text-slate-400">{error}</p>
           <button
-            onClick={() => { setStatus('idle'); setError('') }}
+            onClick={() => { handleSetStatus('idle'); handleSetError('') }}
             className="mt-4 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium transition-colors"
           >
             Tentar novamente
