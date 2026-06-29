@@ -6,8 +6,10 @@ services:
     volumes:
       - ./backend/app:/code/app
       - ./notebooks:/code/notebooks
+      - ./ml_pipeline:/code/ml_pipeline
     environment:
       - NOTEBOOKS_DIR=/code/notebooks
+
 
   frontend:
     build: ./frontend
