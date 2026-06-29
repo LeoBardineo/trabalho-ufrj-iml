@@ -60,52 +60,67 @@ def extract_features(url: str) -> dict:
 
     O dicionário final é a união das duas etapas.
     """
+    url = url.rstrip('/')
     parsed = urlparse(url)
     extracted = tldextract.extract(url)
 
     hostname = parsed.hostname or ""
-    full_url = url
+    
+    # Normalizar para http:// para calcular o comprimento e letras/dígitos
+    normalized_url = url.replace("https://", "http://") if url.startswith("https://") else url
 
     # --- Features léxicas ---
-    url_length = len(full_url)
-    domain_length = len(extracted.domain)
+    url_length = len(normalized_url)
+    domain_length = len(hostname)
     is_domain_ip = int(_is_ip(hostname))
-    is_https = int(parsed.scheme == "https")
+    is_https = int(url.startswith("https://"))
 
     subdomains = [s for s in extracted.subdomain.split(".") if s]
     no_of_subdomain = len(subdomains)
 
-    digits = sum(c.isdigit() for c in full_url)
-    letters = sum(c.isalpha() for c in full_url)
-    degit_ratio_in_url = digits / url_length if url_length else 0.0
-    letter_ratio_in_url = letters / url_length if url_length else 0.0
+    total_letters = sum(c.isalpha() for c in normalized_url)
+    if hostname.startswith("www."):
+        no_of_letters_in_url = total_letters - 8
+    else:
+        no_of_letters_in_url = total_letters - 4
 
-    obfuscated = _OBFUSCATION_PATTERN.findall(full_url)
+    no_of_degits_in_url = sum(c.isdigit() for c in normalized_url)
+    degit_ratio_in_url = no_of_degits_in_url / url_length if url_length else 0.0
+    letter_ratio_in_url = no_of_letters_in_url / url_length if url_length else 0.0
+
+    non_alnum = sum(not c.isalnum() for c in normalized_url)
+    no_of_other_special_chars_in_url = non_alnum - 3
+    if hostname.startswith("www."):
+        no_of_other_special_chars_in_url -= 1
+    no_of_other_special_chars_in_url -= (normalized_url.count("=") + normalized_url.count("?") + normalized_url.count("&"))
+    spacial_char_ratio_in_url = no_of_other_special_chars_in_url / url_length if url_length else 0.0
+
+    obfuscated = _OBFUSCATION_PATTERN.findall(normalized_url)
     no_of_obfuscated_char = len(obfuscated)
     has_obfuscation = int(no_of_obfuscated_char > 0)
     obfuscation_ratio = no_of_obfuscated_char / url_length if url_length else 0.0
 
-    char_continuation_rate = _char_continuation_rate(full_url)
-    url_char_prob = _url_char_prob(full_url)
+    char_continuation_rate = _char_continuation_rate(normalized_url)
+    url_char_prob = _url_char_prob(normalized_url)
 
-    no_of_dots = full_url.count(".")
-    no_of_hyphens = full_url.count("-")
-    no_of_underline = full_url.count("_")
-    no_of_slash = full_url.count("/")
-    no_of_question_mark = full_url.count("?")
-    no_of_equal = full_url.count("=")
-    no_of_at = full_url.count("@")
-    no_of_dollar = full_url.count("$")
-    no_of_exclamation = full_url.count("!")
-    no_of_hash = full_url.count("#")
-    no_of_percent = full_url.count("%")
-    no_of_ampersand = full_url.count("&")
+    no_of_dots = normalized_url.count(".")
+    no_of_hyphens = normalized_url.count("-")
+    no_of_underline = normalized_url.count("_")
+    no_of_slash = normalized_url.count("/")
+    no_of_question_mark = normalized_url.count("?")
+    no_of_equal = normalized_url.count("=")
+    no_of_at = normalized_url.count("@")
+    no_of_dollar = normalized_url.count("$")
+    no_of_exclamation = normalized_url.count("!")
+    no_of_hash = normalized_url.count("#")
+    no_of_percent = normalized_url.count("%")
+    no_of_ampersand = normalized_url.count("&")
 
     # Presença de palavras-chave
-    bank = int("bank" in full_url.lower())
-    pay = int("pay" in full_url.lower())
+    bank = int("bank" in normalized_url.lower())
+    pay = int("pay" in normalized_url.lower())
     crypto = int(
-        any(k in full_url.lower() for k in ("crypto", "bitcoin", "eth", "wallet"))
+        any(k in normalized_url.lower() for k in ("crypto", "bitcoin", "eth", "wallet"))
     )
 
     lexical = {
@@ -115,8 +130,13 @@ def extract_features(url: str) -> dict:
         "IsDomainIP": is_domain_ip,
         "IsHTTPS": is_https,
         "NoOfSubDomain": no_of_subdomain,
-        "DegitRatioInURL": degit_ratio_in_url,
+        "NoOfLettersInURL": no_of_letters_in_url,
         "LetterRatioInURL": letter_ratio_in_url,
+        "NoOfDegitsInURL": no_of_degits_in_url,
+        "DegitRatioInURL": degit_ratio_in_url,
+        "NoOfOtherSpecialCharsInURL": no_of_other_special_chars_in_url,
+        "SpacialCharRatioInURL": spacial_char_ratio_in_url,
+        "DegitRatioInURL": degit_ratio_in_url,
         "HasObfuscation": has_obfuscation,
         "NoOfObfuscatedChar": no_of_obfuscated_char,
         "ObfuscationRatio": obfuscation_ratio,
@@ -142,3 +162,4 @@ def extract_features(url: str) -> dict:
     content = fetch_content_features(url)
 
     return {**lexical, **content}
+
