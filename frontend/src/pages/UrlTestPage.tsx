@@ -391,11 +391,12 @@ function UrlTestPage() {
   const treeWidth = Math.max(leafCount * 180, 1200)
   const treeHalfWidth = treeWidth / 2
 
-  // Calcular centro do caminho dourado para focar no SVG
-  const goldenLeaf = nodes.find(n => n.isLeaf && n.isVisited)
-  const defaultPanX = goldenLeaf ? -(goldenLeaf.x / 2) : 0
+  // Foco inicial centralizado na raiz da árvore (apontando para o caminho dourado)
+  const rootNode = nodes.find(n => n.id === (focusResult?.full_tree?.node_id ?? 0))
+  const rootX = rootNode ? rootNode.x : 0
 
   const zoom = treeViews[focusModel]?.zoom ?? 0.85
+  const defaultPanX = -rootX * zoom
   const panX = treeViews[focusModel]?.panX ?? defaultPanX
   const panY = treeViews[focusModel]?.panY ?? 0
 
@@ -810,7 +811,7 @@ function UrlTestPage() {
                     🔍 Diminuir
                   </button>
                   <button
-                    onClick={() => { setZoom(0.85); setPanX(0); setPanY(0); }}
+                    onClick={() => { setZoom(0.85); setPanX(-rootX * 0.85); setPanY(0); }}
                     className="px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded text-xs font-bold text-slate-200 transition-colors"
                     title="Resetar Foco"
                   >
@@ -829,11 +830,11 @@ function UrlTestPage() {
               >
                 <div 
                   style={{
-                    transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+                    transform: `translate(-50%, 0) translate(${panX}px, ${panY}px) scale(${zoom})`,
                     transformOrigin: '50% 0%',
                     transition: isDragging ? 'none' : 'transform 0.15s ease-out'
                   }}
-                  className="absolute left-1/2 -translate-x-1/2 top-8 pointer-events-none select-none"
+                  className="absolute left-1/2 top-8 pointer-events-none select-none"
                 >
                   <svg width={treeWidth} height="780" viewBox={`-${treeHalfWidth} 0 ${treeWidth} 780`} style={{ overflow: 'visible' }}>
                     {/* Renderizar as Conexões (Linhas) entre Nós */}
@@ -895,23 +896,20 @@ function UrlTestPage() {
                                 className={node.isVisited ? 'drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]' : ''}
                               />
                               {node.isLeaf ? (
-                                /* Nó Folha: Com título e labels explicativos organizados */
+                                /* Nó Folha: labels explicativos organizados (sem título, como no plot_tree do sklearn) */
                                 <>
-                                  <text x="75" y="20" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="bold">
-                                    Folha de Decisão
-                                  </text>
-                                  <text x="75" y="38" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                  <text x="75" y="24" textAnchor="middle" fill="#94a3b8" fontSize="10">
                                     entropy = {node.impurity.toFixed(3)}
                                   </text>
-                                  <text x="75" y="56" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                  <text x="75" y="48" textAnchor="middle" fill="#94a3b8" fontSize="10">
                                     amostras = {node.samples}
                                   </text>
-                                  <text x="75" y="74" textAnchor="middle" fill="#94a3b8" fontSize="10">
-                                    valores = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
+                                  <text x="75" y="72" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    valores = [{Math.round(node.value[0] * node.samples)}, {Math.round(node.value[1] * node.samples)}]
                                   </text>
                                   <text
                                     x="75"
-                                    y="92"
+                                    y="96"
                                     textAnchor="middle"
                                     fill={node.className === 'Phishing' ? '#93c5fd' : '#fdba74'}
                                     fontSize="10"
@@ -933,7 +931,7 @@ function UrlTestPage() {
                                     amostras = {node.samples}
                                   </text>
                                   <text x="75" y="74" textAnchor="middle" fill="#94a3b8" fontSize="10">
-                                    valores = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
+                                    valores = [{Math.round(node.value[0] * node.samples)}, {Math.round(node.value[1] * node.samples)}]
                                   </text>
                                   <text
                                     x="75"
