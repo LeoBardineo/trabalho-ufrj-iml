@@ -5,12 +5,12 @@ BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 
 MODELS = {
     # Supervisionados - Árvore de Decisão
-    "arvore_base":      ("arvore-de-decisao/dt_base_sl.pkl",    "df_35", "estimator"),
-    "arvore_otimizado": ("arvore-de-decisao/dt_results_sl.pkl", "df_35", "best_estimator"),
+    "arvore_base":      ("arvore-de-decisao/dt_base_final.pkl",    "df_35", "estimator"),
+    "arvore_otimizado": ("arvore-de-decisao/dt_results_final.pkl", "df_35", "best_estimator"),
 
     # Supervisionados - XGBoost  
-    "xgboost_base":      ("xgboost/xgb_base_sl.pkl",    "df_35", "estimator"),
-    "xgboost_otimizado": ("xgboost/xgb_results_sl.pkl", "df_35", "best_estimator"),
+    "xgboost_base":      ("xgboost/xgb_base_final.pkl",    "df_35", "estimator"),
+    "xgboost_otimizado": ("xgboost/xgb_results_final.pkl", "df_35", "best_estimator"),
 
     # Nao-supervisionados (pipeline: scaler -> pca -> modelo)
     "kmeans":            ("nao-supervisionados/kmeans_35.pkl", None, None),
