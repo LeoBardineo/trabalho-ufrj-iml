@@ -41,16 +41,19 @@ interface TreeNode {
   y?: number
 }
 
-interface PredictResult {
-  url: string
-  features: Record<string, number | string>
+interface ModelPredictResult {
   prediction: number | null
   label: string | null
-  model_used?: string
   phishing_probability?: number | null
   pca_coords?: PcaCoords | null
   decision_path?: DecisionPathNode[] | null
   full_tree?: TreeNode | null
+}
+
+interface PredictResult {
+  url: string
+  features: Record<string, number | string>
+  predictions: Record<string, ModelPredictResult>
 }
 
 interface HistoryItem {
@@ -141,21 +144,31 @@ function UrlTestPage() {
   const [url, setUrl] = useState(() => sessionStorage.getItem('test_url') || '')
   const [status, setStatus] = useState<Status>(() => (sessionStorage.getItem('test_status') as Status) || 'idle')
   const [result, setResult] = useState<PredictResult | null>(() => {
-    const saved = sessionStorage.getItem('test_result')
-    return saved ? JSON.parse(saved) : null
+    try {
+      const saved = sessionStorage.getItem('test_result')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        // Apenas carrega se for do formato multi-modelo novo (evita crash na troca de features)
+        return parsed && parsed.predictions ? parsed : null
+      }
+      return null
+    } catch {
+      return null
+    }
   })
   const [error, setError] = useState(() => sessionStorage.getItem('test_error') || '')
   const [models, setModels] = useState<{ key: string; label: string }[]>([
     { key: 'arvore_otimizado', label: 'Automático (Árvore de Decisão Otimizada)' }
   ])
-  const [selectedModel, setSelectedModel] = useState(() => sessionStorage.getItem('test_model') || 'arvore_otimizado')
+  const [focusModel, setFocusModel] = useState(() => sessionStorage.getItem('test_model') || 'arvore_otimizado')
   const [pcaBackground, setPcaBackground] = useState<{ pc1: number; pc2: number; label: number }[]>([])
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem('phish_history')
       if (saved) {
         const parsed = JSON.parse(saved)
-        return Array.isArray(parsed) ? parsed.filter(item => item && item.result) : []
+        // Apenas carrega itens que contêm o dicionário 'predictions' do novo formato multi-modelo
+        return Array.isArray(parsed) ? parsed.filter(item => item && item.result && item.result.predictions) : []
       }
       return []
     } catch {
@@ -163,12 +176,12 @@ function UrlTestPage() {
     }
   })
 
-  // Estados de Zoom e Pan para a Árvore
-  const [zoom, setZoom] = useState(0.85)
-  const [panX, setPanX] = useState(0)
-  const [panY, setPanY] = useState(0)
+  // Estados de Zoom e Pan para a Árvore independentes por modelo
+  const [treeViews, setTreeViews] = useState<Record<string, { zoom: number, panX: number, panY: number }>>({})
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+
+
 
   const handleSetUrl = (val: string) => {
     setUrl(val)
@@ -190,8 +203,8 @@ function UrlTestPage() {
     setError(val)
     sessionStorage.setItem('test_error', val)
   }
-  const handleSetSelectedModel = (val: string) => {
-    setSelectedModel(val)
+  const handleSetFocusModel = (val: string) => {
+    setFocusModel(val)
     sessionStorage.setItem('test_model', val)
   }
 
@@ -202,7 +215,7 @@ function UrlTestPage() {
         if (data && data.models) {
           setModels(data.models)
           if (data.default && !sessionStorage.getItem('test_model')) {
-            handleSetSelectedModel(data.default)
+            handleSetFocusModel(data.default)
           }
         }
       })
@@ -232,7 +245,7 @@ function UrlTestPage() {
       const response = await fetch(`${API_URL}/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed, model_key: selectedModel }),
+        body: JSON.stringify({ url: trimmed }), // Roda todos os modelos no back-end
       })
 
       if (!response.ok) {
@@ -248,11 +261,11 @@ function UrlTestPage() {
       const historyItem: HistoryItem = {
         url: data.url,
         timestamp: Date.now(),
-        model_used: selectedModel,
+        model_used: focusModel,
         result: data
       }
       setHistory(prev => {
-        const filtered = prev.filter(h => !(h.url === historyItem.url && h.model_used === historyItem.model_used))
+        const filtered = prev.filter(h => h.url !== historyItem.url)
         const updated = [historyItem, ...filtered].slice(0, 10)
         localStorage.setItem('phish_history', JSON.stringify(updated))
         return updated
@@ -272,25 +285,13 @@ function UrlTestPage() {
     setHistory([])
   }
 
-  // Funções de Arrastar/Pan da Árvore
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true)
-    setDragStart({ x: e.clientX - panX, y: e.clientY - panY })
-  }
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return
-    setPanX(e.clientX - dragStart.x)
-    setPanY(e.clientY - dragStart.y)
-  }
 
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
-
-  const isPhishing = result?.label === 'phishing' || result?.prediction === 0
-  const isLegitimate = result?.label === 'legitimate' || result?.prediction === 1
-  const hasModelResult = result?.prediction !== null && result?.prediction !== undefined
+  // Resolvendo a predição para o modelo focado no painel
+  const focusResult = result?.predictions?.[focusModel]
+  const isPhishing = focusResult?.label === 'phishing' || focusResult?.prediction === 0
+  const isLegitimate = focusResult?.label === 'legitimate' || focusResult?.prediction === 1
+  const hasModelResult = focusResult?.prediction !== null && focusResult?.prediction !== undefined
 
   const legitPoints = pcaBackground.filter(p => p.label === 1)
   const phishPoints = pcaBackground.filter(p => p.label === 0)
@@ -300,8 +301,8 @@ function UrlTestPage() {
   const edges: RenderEdge[] = []
   let leafCount = 0
 
-  if (result?.full_tree) {
-    const visitedSet = new Set(result.decision_path?.map(n => n.node_id) || [])
+  if (focusResult?.full_tree) {
+    const visitedSet = new Set(focusResult.decision_path?.map(n => n.node_id) || [])
     const maxDepth = 5 // Mantém profundidade máxima 5 como no notebook
 
     // Passagem 1: Calcula as coordenadas usando in-order midpoint para simetria compacta perfeita
@@ -310,9 +311,9 @@ function UrlTestPage() {
       const isPlaceholder = !isVisited && depth >= maxDepth
 
       if (isPlaceholder || node.is_leaf) {
-        const x = leafCount * 155 // 155px de espaçamento horizontal constante entre folhas/placeholders
+        const x = leafCount * 180 // 180px de espaçamento horizontal constante
         node.x = x
-        node.y = depth * 135
+        node.y = depth * 170 // 170px de espaçamento vertical para evitar colisão das linhas
         leafCount++
         return x
       }
@@ -321,14 +322,14 @@ function UrlTestPage() {
       const rightX = assignCoords(node.right!, depth + 1)
       const x = (leftX + rightX) / 2
       node.x = x
-      node.y = depth * 135
+      node.y = depth * 170
       return x
     }
 
-    assignCoords(result.full_tree, 0)
+    assignCoords(focusResult.full_tree, 0)
 
     // Passagem 2: Centraliza a árvore em X=0 e coleta os nós/conexões para renderização
-    const centerOffset = ((leafCount - 1) * 155) / 2
+    const centerOffset = ((leafCount - 1) * 180) / 2
 
     const collectRenderData = (node: TreeNode, depth: number) => {
       const isVisited = visitedSet.has(node.node_id)
@@ -383,12 +384,58 @@ function UrlTestPage() {
       }
     }
 
-    collectRenderData(result.full_tree, 0)
+    collectRenderData(focusResult.full_tree, 0)
   }
 
   // Largura e ViewBox do SVG calculados de forma dinâmica para ajustar perfeitamente a árvore na tela
-  const treeWidth = Math.max(leafCount * 155, 1200)
+  const treeWidth = Math.max(leafCount * 180, 1200)
   const treeHalfWidth = treeWidth / 2
+
+  // Calcular centro do caminho dourado para focar no SVG
+  const goldenLeaf = nodes.find(n => n.isLeaf && n.isVisited)
+  const defaultPanX = goldenLeaf ? -(goldenLeaf.x / 2) : 0
+
+  const zoom = treeViews[focusModel]?.zoom ?? 0.85
+  const panX = treeViews[focusModel]?.panX ?? defaultPanX
+  const panY = treeViews[focusModel]?.panY ?? 0
+
+  const setZoom = (val: number | ((z: number) => number)) => {
+    setTreeViews(prev => {
+      const oldZ = prev[focusModel]?.zoom ?? 0.85
+      const newZ = typeof val === 'function' ? val(oldZ) : val
+      return { ...prev, [focusModel]: { ...(prev[focusModel] || {panX: defaultPanX, panY: 0}), zoom: newZ } }
+    })
+  }
+  const setPanX = (val: number | ((x: number) => number)) => {
+    setTreeViews(prev => {
+      const oldX = prev[focusModel]?.panX ?? defaultPanX
+      const newX = typeof val === 'function' ? val(oldX) : val
+      return { ...prev, [focusModel]: { ...(prev[focusModel] || {zoom: 0.85, panY: 0}), panX: newX } }
+    })
+  }
+  const setPanY = (val: number | ((y: number) => number)) => {
+    setTreeViews(prev => {
+      const oldY = prev[focusModel]?.panY ?? 0
+      const newY = typeof val === 'function' ? val(oldY) : val
+      return { ...prev, [focusModel]: { ...(prev[focusModel] || {zoom: 0.85, panX: defaultPanX}), panY: newY } }
+    })
+  }
+
+  // Funções de Arrastar/Pan da Árvore
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true)
+    setDragStart({ x: e.clientX - panX, y: e.clientY - panY })
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return
+    setPanX(e.clientX - dragStart.x)
+    setPanY(e.clientY - dragStart.y)
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4">
@@ -405,32 +452,6 @@ function UrlTestPage() {
       {/* Grid de Entrada */}
       <div className="max-w-3xl mx-auto mb-8">
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Seletor de Modelo */}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="model-select" className="text-sm font-semibold text-slate-300">
-              Modelo de Inteligência Artificial
-            </label>
-            <div className="relative">
-              <select
-                id="model-select"
-                value={selectedModel}
-                onChange={(e) => handleSetSelectedModel(e.target.value)}
-                className="w-full px-5 py-3.5 bg-phish-card border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-phish-accent focus:border-transparent transition-all text-base appearance-none cursor-pointer"
-              >
-                {models.map((m) => (
-                  <option key={m.key} value={m.key} className="bg-slate-900 text-white">
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-slate-400">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
           {/* Input da URL */}
           <div className="flex gap-3">
             <input
@@ -478,13 +499,16 @@ function UrlTestPage() {
             <div className="flex flex-wrap gap-2">
               {history.map((item, idx) => {
                 const itemResult = item.result
-                const isPhish = itemResult.label === 'phishing' || itemResult.prediction === 0
+                // Fixa o modelo focado na Árvore Otimizada para determinar a cor permanente no histórico
+                const focusItemResult = itemResult.predictions?.['arvore_otimizado'] || 
+                  (itemResult.predictions ? Object.values(itemResult.predictions)[0] : null)
+                const isPhish = focusItemResult?.label === 'phishing' || focusItemResult?.prediction === 0
                 return (
                   <button
                     key={idx}
                     onClick={() => {
                       handleSetUrl(item.url)
-                      handleSetSelectedModel(item.model_used)
+                      handleSetFocusModel(item.model_used)
                       handleSetResult(item.result)
                       handleSetStatus('success')
                       handleSetError('')
@@ -498,7 +522,7 @@ function UrlTestPage() {
                     <span>{isPhish ? '🚨' : '✅'}</span>
                     <span className="truncate max-w-[150px]">{item.url}</span>
                     <span className="text-[10px] text-slate-500 ml-1 font-mono">
-                      ({item.model_used === 'arvore_otimizado' ? 'Árvore' : item.model_used === 'kmeans' ? 'K-Means' : item.model_used})
+                      (Consultado)
                     </span>
                   </button>
                 )
@@ -512,6 +536,86 @@ function UrlTestPage() {
       {status === 'success' && result && (
         <div className="space-y-8">
           
+          {/* Painel Comparativo Multi-Modelo */}
+          <div className="bg-phish-card p-6 rounded-2xl border border-white/10">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-200">
+                  📊 Painel Comparativo de Modelos
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Comparação das predições de todos os modelos de IA para a URL analisada em tempo real. Clique em um modelo para focar.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {models.map((m) => {
+                const predObj = result.predictions?.[m.key]
+                if (!predObj) return null
+
+                const isModelPhish = predObj.label === 'phishing' || predObj.prediction === 0
+                const isModelLgt = predObj.label === 'legitimate' || predObj.prediction === 1
+                const prob = predObj.phishing_probability !== null && predObj.phishing_probability !== undefined
+                  ? Math.round(predObj.phishing_probability * 100)
+                  : null
+
+                const isActive = focusModel === m.key
+
+                return (
+                  <div
+                    key={m.key}
+                    onClick={() => handleSetFocusModel(m.key)}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 select-none flex flex-col justify-between ${
+                      isActive
+                        ? 'bg-blue-500/10 border-blue-500/40 shadow-lg shadow-blue-500/5'
+                        : 'bg-slate-900/40 border-white/5 hover:bg-slate-900/60 hover:border-white/10'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-bold text-slate-300 truncate max-w-[170px]" title={m.label}>
+                          {m.label.replace('Automático (', '').replace(')', '')}
+                        </span>
+                        {m.key === 'arvore_otimizado' && (
+                          <span className="text-[10px] text-[#facc15] font-semibold">🏆 Melhor Modelo</span>
+                        )}
+                      </div>
+                      {isActive && (
+                        <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider">
+                          Foco
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center justify-between mt-3">
+                      <span
+                        className={`px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wide ${
+                          isModelPhish
+                            ? 'bg-red-500/15 text-red-400'
+                            : isModelLgt
+                            ? 'bg-green-500/15 text-green-400'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {isModelPhish ? '🚨 Phishing' : isModelLgt ? '✅ Seguro' : 'Sem Dados'}
+                      </span>
+                      
+                      {prob !== null ? (
+                        <span className={`text-sm font-extrabold ${isModelPhish ? 'text-red-400' : 'text-green-400'}`}>
+                          {isModelPhish ? prob : 100 - prob}%
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          N/A (Geométrico)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
           {/* Linha Superior: Resultados Básicos e Features Extraídas (Lado a Lado) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
@@ -534,13 +638,13 @@ function UrlTestPage() {
                     </h2>
                     <p className="text-slate-400 text-sm break-all font-mono mb-2">{result.url}</p>
                     <p className="text-slate-500 text-xs mt-3">
-                      Modelo: <span className="font-semibold text-slate-300">{getModelLabel(result.model_used || '')}</span>
+                      Modelo em Foco: <span className="font-semibold text-slate-300">{getModelLabel(focusModel)}</span>
                     </p>
                   </div>
                   
                   {/* Grau de Risco - Exibido APENAS se isPhishing for verdadeiro */}
-                  {isPhishing && result.phishing_probability !== null && result.phishing_probability !== undefined && (
-                    <RiskGauge probability={result.phishing_probability} />
+                  {isPhishing && focusResult?.phishing_probability !== null && focusResult?.phishing_probability !== undefined && (
+                    <RiskGauge probability={focusResult.phishing_probability} />
                   )}
                 </div>
               ) : (
@@ -586,8 +690,8 @@ function UrlTestPage() {
             </div>
           </div>
 
-          {/* Abaixo: Projeção PCA (Largura Total) - Exibido apenas se o modelo for K-Means */}
-          {selectedModel === 'kmeans' && pcaBackground.length > 0 && result.pca_coords && (
+          {/* Abaixo: Projeção PCA (Largura Total) - Exibido apenas se o modelo em foco for K-Means */}
+          {focusModel === 'kmeans' && pcaBackground.length > 0 && focusResult?.pca_coords && (
             <div className="bg-phish-card p-6 rounded-2xl border border-white/10">
               <h3 className="text-lg font-semibold text-slate-200 mb-2">
                 📊 Projeção Geométrica PCA (2D)
@@ -615,13 +719,13 @@ function UrlTestPage() {
                       tick={{ fill: '#64748b', fontSize: 10 }}
                     />
                     <Tooltip cursor={false} />
-                    <Scatter name="Legítimo" data={legitPoints} fill="#ef4444" opacity={0.4} shape="circle" />
-                    <Scatter name="Phishing" data={phishPoints} fill="#3b82f6" opacity={0.4} shape="circle" />
+                    <Scatter name="Legítimo" data={legitPoints} fill="#3b82f6" opacity={0.4} shape="circle" />
+                    <Scatter name="Phishing" data={phishPoints} fill="#ef4444" opacity={0.4} shape="circle" />
                     
                     {/* Efeito Ping Pulsante na URL Testada */}
                     <Scatter
                       name="URL Testada"
-                      data={[{ pc1: result.pca_coords.pc1, pc2: result.pca_coords.pc2 }]}
+                      data={[{ pc1: focusResult.pca_coords.pc1, pc2: focusResult.pca_coords.pc2 }]}
                       fill="#facc15"
                       shape={(props: any) => {
                         const { cx, cy } = props
@@ -640,7 +744,7 @@ function UrlTestPage() {
                     {/* Ponto Fixo da URL Testada */}
                     <Scatter
                       name="URL Testada Fixo"
-                      data={[{ pc1: result.pca_coords.pc1, pc2: result.pca_coords.pc2 }]}
+                      data={[{ pc1: focusResult.pca_coords.pc1, pc2: focusResult.pca_coords.pc2 }]}
                       fill="#facc15"
                       shape={(props: any) => {
                         const { cx, cy } = props
@@ -663,10 +767,10 @@ function UrlTestPage() {
               {/* Legenda do Gráfico */}
               <div className="flex justify-center gap-6 mt-2 text-xs">
                 <span className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444] opacity-80" /> Legítimo
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#3b82f6] opacity-80" /> Legítimo
                 </span>
                 <span className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#3b82f6] opacity-80" /> Phishing
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444] opacity-80" /> Phishing
                 </span>
                 <span className="flex items-center gap-1.5 text-slate-200 font-semibold">
                   <span className="w-3 h-3 rounded-full bg-[#facc15] border border-white" /> URL Buscada
@@ -676,16 +780,18 @@ function UrlTestPage() {
           )}
 
           {/* Abaixo: Árvore de Decisão Visual Interativa (Largura Total com Zoom/Pan) - Apenas para Modelos de Árvore */}
-          {(selectedModel === 'arvore_base' || selectedModel === 'arvore_otimizado') && result.full_tree && (
+          {(focusModel === 'arvore_base' || focusModel === 'arvore_otimizado') && focusResult?.full_tree && (
             <div className="bg-phish-card p-6 rounded-2xl border border-white/10 relative overflow-hidden">
               <div className="flex justify-between items-center mb-4">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-200">
                     🌳 Gráfico da Árvore de Decisão
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    Navegue pela árvore de decisão original (profundidade limite = 5). O caminho tomado para classificar esta URL está destacado em <span className="text-[#facc15] font-semibold">dourado</span>. Clique e arraste para mover, use os botões ao lado para dar zoom.
-                  </p>
+                  <div className="text-xs text-slate-400 mt-1 space-y-1">
+                    <p>Navegue pela árvore de decisão original (profundidade limite = 5).</p>
+                    <p>O caminho tomado para classificar esta URL está destacado em <span className="text-[#facc15] font-semibold">dourado</span>.</p>
+                    <p>Clique e arraste para mover, use os botões ao lado para dar zoom.</p>
+                  </div>
                 </div>
                 {/* Controles de Zoom */}
                 <div className="flex gap-2 bg-slate-900 p-1 rounded-lg border border-white/5 select-none">
@@ -735,19 +841,19 @@ function UrlTestPage() {
                       <g key={idx}>
                         <line
                           x1={edge.fromX}
-                          y1={edge.fromY + 45}
+                          y1={edge.fromY + 55}
                           x2={edge.toX}
-                          y2={edge.toY - 45}
+                          y2={edge.toY - 55}
                           stroke={edge.isVisited ? '#facc15' : 'rgba(255,255,255,0.1)'}
                           strokeWidth={edge.isVisited ? 3 : 1}
                           strokeDasharray={edge.isVisited ? undefined : '3 3'}
                         />
                         {/* Texto descritivo True/False nos desvios */}
                         <text
-                          x={(edge.fromX + edge.toX) / 2 + (edge.label === 'Sim' ? -15 : 15)}
-                          y={(edge.fromY + 45 + edge.toY - 45) / 2}
+                          x={(edge.fromX + edge.toX) / 2 + (edge.label === 'Sim' ? -25 : 25)}
+                          y={(edge.fromY + 55 + edge.toY - 55) / 2 - 5}
                           fill={edge.isVisited ? '#facc15' : '#475569'}
-                          fontSize="9"
+                          fontSize="10"
                           fontWeight="bold"
                           textAnchor="middle"
                         >
@@ -777,10 +883,10 @@ function UrlTestPage() {
                               </text>
                             </g>
                           ) : (
-                            <g transform={`translate(${node.x - 65}, ${node.y - 45})`}>
+                            <g transform={`translate(${node.x - 75}, ${node.y - 55})`}>
                               <rect
-                                width="130"
-                                height="90"
+                                width="150"
+                                height="110"
                                 rx="6"
                                 fill={node.className === 'Phishing' ? '#2563eb' : '#ea580c'}
                                 fillOpacity={node.isVisited ? 0.35 : 0.12}
@@ -789,52 +895,55 @@ function UrlTestPage() {
                                 className={node.isVisited ? 'drop-shadow-[0_0_10px_rgba(250,204,21,0.5)]' : ''}
                               />
                               {node.isLeaf ? (
-                                /* Nó Folha: Sem feature no topo, inicia com o gini direto como no notebook */
+                                /* Nó Folha: Com título e labels explicativos organizados */
                                 <>
-                                  <text x="65" y="25" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    gini = {node.impurity.toFixed(3)}
+                                  <text x="75" y="20" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="bold">
+                                    Folha de Decisão
                                   </text>
-                                  <text x="65" y="42" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    samples = {node.samples}
+                                  <text x="75" y="38" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    entropy = {node.impurity.toFixed(3)}
                                   </text>
-                                  <text x="65" y="59" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    value = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
+                                  <text x="75" y="56" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    amostras = {node.samples}
+                                  </text>
+                                  <text x="75" y="74" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    valores = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
                                   </text>
                                   <text
-                                    x="65"
-                                    y="74"
+                                    x="75"
+                                    y="92"
                                     textAnchor="middle"
                                     fill={node.className === 'Phishing' ? '#93c5fd' : '#fdba74'}
-                                    fontSize="8"
+                                    fontSize="10"
                                     fontWeight="bold"
                                   >
-                                    class = {node.className}
+                                    Classe = {node.className}
                                   </text>
                                 </>
                               ) : (
                                 /* Nó de Divisão padrão */
                                 <>
-                                  <text x="65" y="15" textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">
+                                  <text x="75" y="20" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="bold">
                                     {node.feature} &lt;= {node.threshold?.toFixed(2)}
                                   </text>
-                                  <text x="65" y="32" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    gini = {node.impurity.toFixed(3)}
+                                  <text x="75" y="38" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    entropy = {node.impurity.toFixed(3)}
                                   </text>
-                                  <text x="65" y="47" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    samples = {node.samples}
+                                  <text x="75" y="56" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    amostras = {node.samples}
                                   </text>
-                                  <text x="65" y="62" textAnchor="middle" fill="#94a3b8" fontSize="8">
-                                    value = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
+                                  <text x="75" y="74" textAnchor="middle" fill="#94a3b8" fontSize="10">
+                                    valores = [{node.value[0].toFixed(0)}, {node.value[1].toFixed(0)}]
                                   </text>
                                   <text
-                                    x="65"
-                                    y="77"
+                                    x="75"
+                                    y="92"
                                     textAnchor="middle"
                                     fill={node.className === 'Phishing' ? '#93c5fd' : '#fdba74'}
-                                    fontSize="8"
+                                    fontSize="10"
                                     fontWeight="bold"
                                   >
-                                    class = {node.className}
+                                    Classe = {node.className}
                                   </text>
                                 </>
                               )}
