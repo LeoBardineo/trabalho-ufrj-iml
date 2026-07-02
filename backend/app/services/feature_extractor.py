@@ -136,7 +136,6 @@ def extract_features(url: str) -> dict:
         "DegitRatioInURL": degit_ratio_in_url,
         "NoOfOtherSpecialCharsInURL": no_of_other_special_chars_in_url,
         "SpacialCharRatioInURL": spacial_char_ratio_in_url,
-        "DegitRatioInURL": degit_ratio_in_url,
         "HasObfuscation": has_obfuscation,
         "NoOfObfuscatedChar": no_of_obfuscated_char,
         "ObfuscationRatio": obfuscation_ratio,
