@@ -54,6 +54,16 @@ Temos como falso positivo o bloqueio de um site seguro, e o falso negativo o dei
 - **F1-Score**: média harmônica entre precision e recall, para o desempate de modelos que se saíram bem em apenas uma das métricas  
 - **Tempo de inferência**: medir quanto tempo o modelo leva para classificar os dados, sendo importante para detectar a URL antes da página carregar para o usuário
 
+## 📁 Estrutura do Projeto e Integrações
+
+Para aprofundamento técnico, o repositório está subdividido e documentado nas seguintes pastas:
+
+- **[`ml_pipeline/`](./ml_pipeline/README.md)**: Contém os modelos de Machine Learning serializados (`.pkl`). As especificações de como os atributos são filtrados e como a integração do pipeline funciona estão detalhadas na **[Documentação do Pipeline de ML](./ml_pipeline/README.md)** e no documento de **[Integração da API](./ml_pipeline/INTEGRACAO.md)**.
+- **`notebooks/`**: Notebooks Jupyter contendo a Análise Exploratória, limpeza de dados, treinamentos com K-Fold, otimização com Grid Search e extração das Árvores.
+- **`backend/`**: Servidor FastAPI responsável por extrair dinamicamente as características da URL pesquisada, carregar os modelos via cache em RAM e servir as predições.
+- **`frontend/`**: Interface SPA (React + TypeScript + Tailwind). Consome a API para renderizar o painel de vereditos, o gráfico de redução de dimensionalidade PCA e plotar interativamente o Caminho Dourado da Árvore de Decisão.
+- **`docs/`**: Contém arquivos de apoio, como relatórios gerados e anotações para apresentações.
+
 ## Como Rodar o Projeto Localmente 🚀
 
 O projeto utiliza **Docker** e **Docker Compose** para orquestrar e rodar tanto o front-end quanto o back-end em conjunto de forma simples.
